@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#f6f7f9" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="吃药计时" />
+<meta name="description" content="吃药计时：点一下记下一种，自动算间隔，结束看总计。" />
+<title>吃药计时</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --fg:#12161c; --muted:#7c8595; --line:#e7e9ee;
+    --accent:#2f6bff; --accent-shadow:rgba(47,107,255,.26);
+    --ok:#12a06b; --ok-shadow:rgba(18,160,107,.28);
+    --warn:#e5484d;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0e1116; --fg:#eef1f6; --muted:#8c95a4; --line:#252b35;
+      --accent:#5b8bff; --accent-shadow:rgba(91,139,255,.18);
+      --ok:#2fc48d; --ok-shadow:rgba(47,196,141,.16);
+      --warn:#ff6369;
+    }
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ height:100%; }
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    display:flex; align-items:center; justify-content:center;
+    padding:28px 22px calc(28px + env(safe-area-inset-bottom));
+    -webkit-font-smoothing:antialiased;
+  }
+  .app{ width:100%; max-width:360px; text-align:center; }
+  [hidden]{ display:none !important; }
+
+  .top{ font-size:13px; color:var(--muted); letter-spacing:.04em; }
+  .timer{
+    margin-top:12px; font-size:clamp(54px,17vw,78px); line-height:1.02;
+    font-weight:250; font-variant-numeric:tabular-nums; letter-spacing:.005em;
+  }
+  .sub{ margin-top:10px; font-size:14px; color:var(--muted); min-height:20px; }
+
+  .main{
+    margin:26px auto 0; width:176px; height:176px; border:0; border-radius:50%;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px;
+    background:var(--accent); color:#fff; cursor:pointer; font-family:inherit;
+    box-shadow:0 12px 30px var(--accent-shadow);
+    transition:transform .12s ease, background .25s ease, box-shadow .25s ease;
+  }
+  .main:active{ transform:scale(.965); }
+  .main .lbl{ font-size:30px; font-weight:600; letter-spacing:.08em; text-indent:.08em; }
+  .main .aside{ font-size:13px; opacity:.82; letter-spacing:.02em; }
+  .main.ready{ background:var(--ok); box-shadow:0 12px 30px var(--ok-shadow); animation:pulse 2s ease-in-out infinite; }
+  @keyframes pulse{ 50%{ transform:scale(1.028); } }
+
+  .end{
+    margin:20px auto 0; border:1px solid var(--line); background:transparent;
+    color:var(--muted); font:inherit; font-size:14px; letter-spacing:.06em;
+    padding:11px 24px; border-radius:999px; cursor:pointer;
+  }
+  .end:hover{ color:var(--fg); }
+  .end:active{ transform:scale(.98); }
+
+  .foot{
+    margin-top:18px; display:flex; align-items:center; justify-content:space-between;
+    font-size:13px; color:var(--muted);
+  }
+  .link{
+    border:0; background:transparent; color:var(--muted); font:inherit; cursor:pointer;
+    padding:9px 6px; border-radius:10px; letter-spacing:.02em;
+  }
+  .link:hover{ color:var(--fg); }
+  .link:disabled{ opacity:.32; cursor:default; }
+  .count{ font-variant-numeric:tabular-nums; letter-spacing:.02em; }
+
+  /* 记录页 */
+  .sum-title{ font-size:21px; font-weight:600; }
+  .sum-sub{ margin-top:8px; font-size:13px; color:var(--muted); }
+  .list{ list-style:none; margin:22px 0 0; padding:0; width:100%; }
+  .list li{
+    display:grid; grid-template-columns:1fr auto 74px; gap:12px; align-items:baseline;
+    padding:11px 2px; border-bottom:1px solid var(--line); font-size:15px; text-align:left;
+  }
+  .list li:last-child{ border-bottom:0; }
+  .idx{ color:var(--muted); font-size:13px; letter-spacing:.02em; }
+  .at{ font-variant-numeric:tabular-nums; }
+  .gap{ font-size:13px; color:var(--muted); text-align:right; font-variant-numeric:tabular-nums; }
+  .gap.early{ color:var(--warn); }
+  .again{
+    margin-top:26px; width:100%; height:54px; border:0; border-radius:16px;
+    background:var(--accent); color:#fff; font:inherit; font-size:16px; font-weight:600;
+    letter-spacing:.06em; cursor:pointer; transition:transform .12s ease;
+  }
+  .again:active{ transform:scale(.99); }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <section id="screen">
+    <div class="top" id="top">点一下开始</div>
+    <div class="timer" id="timer">00:00</div>
+    <div class="sub" id="sub" aria-live="polite">记下第一种药</div>
+
+    <button class="main" id="mainBtn" type="button">
+      <span class="lbl" id="mainLbl">吃药</span>
+      <span class="aside" id="mainAside">第 1 种</span>
+    </button>
+
+    <button class="end" id="endBtn" type="button" hidden>结束这一轮</button>
+
+    <div class="foot">
+      <button class="link" id="intervalBtn" type="button">间隔 15 分钟</button>
+      <span class="count" id="count">已吃 0 种</span>
+      <button class="link" id="undoBtn" type="button">撤销</button>
+    </div>
+  </section>
+
+  <section id="summary" hidden>
+    <div class="sum-title">这一轮吃完了</div>
+    <div class="sum-sub" id="sumSub"></div>
+    <ol class="list" id="list"></ol>
+    <button class="again" id="againBtn" type="button">再开一轮</button>
+  </section>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var KEY = 'med-timer-v2';
+  var INTERVALS = [10, 15, 20];
+  var TOLERANCE = 30 * 1000;   // 提前 30 秒内不追问，视为按时
+
+  var $ = function (id) { return document.getElementById(id); };
+  var el = {
+    screen: $('screen'), top: $('top'), timer: $('timer'), sub: $('sub'),
+    btn: $('mainBtn'), lbl: $('mainLbl'), aside: $('mainAside'), end: $('endBtn'),
+    intervalBtn: $('intervalBtn'), count: $('count'), undo: $('undoBtn'),
+    summary: $('summary'), sumSub: $('sumSub'), list: $('list'), again: $('againBtn')
+  };
+
+  function fresh() {
+    return { doses: [], intervalMin: 15, done: false, endedAt: null };
+  }
+
+  var s = load();
+  var ticker = null;
+  var wasReady = false;
+
+  function buzz(pattern) {
+    if (!navigator.vibrate) return;
+    try { navigator.vibrate(pattern); } catch (e) {}
+  }
+
+  function load() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      if (!raw) return fresh();
+      var o = JSON.parse(raw);
+      if (!o || !Array.isArray(o.doses)) return fresh();
+      return {
+        doses: o.doses.filter(function (t) { return typeof t === 'number'; }),
+        intervalMin: INTERVALS.indexOf(o.intervalMin) >= 0 ? o.intervalMin : 15,
+        done: !!o.done,
+        endedAt: typeof o.endedAt === 'number' ? o.endedAt : null
+      };
+    } catch (e) { return fresh(); }
+  }
+
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {}
+  }
+
+  /* ---------- 时间格式 ---------- */
+
+  function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+
+  function fmtDur(ms) {
+    var t = Math.max(0, Math.floor(ms / 1000));
+    var h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), sec = t % 60;
+    return h ? h + ':' + pad2(m) + ':' + pad2(sec) : pad2(m) + ':' + pad2(sec);
+  }
+
+  function fmtLeft(ms) {
+    var t = Math.max(0, Math.ceil(ms / 1000));
+    var m = Math.floor(t / 60), sec = t % 60;
+    if (m && sec) return m + ' 分 ' + sec + ' 秒';
+    if (m) return m + ' 分钟';
+    return sec + ' 秒';
+  }
+
+  function fmtLong(ms) {
+    var t = Math.max(0, Math.round(ms / 1000));
+    var h = Math.floor(t / 3600); t -= h * 3600;
+    var m = Math.floor(t / 60); var sec = t - m * 60;
+    var out = [];
+    if (h) out.push(h + ' 小时');
+    if (m) out.push(m + ' 分');
+    if (!h && sec) out.push(sec + ' 秒');
+    return out.length ? out.join(' ') : '0 秒';
+  }
+
+  function clockOf(ts) {
+    var d = new Date(ts);
+    return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  }
+
+  /* ---------- 渲染 ---------- */
+
+  function render() {
+    if (s.done) { renderSummary(); return; }
+    el.summary.hidden = true;
+    el.screen.hidden = false;
+
+    var now = Date.now();
+    var n = s.doses.length;
+    var need = s.intervalMin * 60000;
+
+    el.intervalBtn.textContent = '间隔 ' + s.intervalMin + ' 分钟';
+    el.undo.disabled = n === 0;
+    el.end.hidden = n === 0;
+    el.btn.classList.remove('ready');
+
+    if (n === 0) {
+      wasReady = false;
+      el.top.textContent = '点一下开始';
+      el.timer.textContent = '00:00';
+      el.sub.textContent = '记下第一种药';
+      el.lbl.textContent = '吃药';
+      el.aside.textContent = '第 1 种';
+      el.count.textContent = '已吃 0 种';
+      document.title = '吃药计时';
+      return;
+    }
+
+    var sinceLast = now - s.doses[n - 1];
+    el.top.textContent = '距上次吃药';
+    el.timer.textContent = fmtDur(sinceLast);
+    el.lbl.textContent = '吃药';
+    el.aside.textContent = '第 ' + (n + 1) + ' 种';
+    el.count.textContent = '已吃 ' + n + ' 种 · ' + fmtDur(now - s.doses[0]);
+
+    var left = need - sinceLast;
+    if (left > 0) {
+      wasReady = false;
+      el.sub.textContent = '还要等 ' + fmtLeft(left);
+      document.title = '吃药计时 · 等 ' + fmtLeft(left);
+    } else {
+      if (!wasReady) buzz([30, 70, 30]);   // 到点了，轻振一下提醒
+      wasReady = true;
+      el.sub.textContent = '间隔到了，可以吃下一种';
+      el.btn.classList.add('ready');
+      document.title = '可以吃药了';
+    }
+  }
+
+  function renderSummary() {
+    el.screen.hidden = true;
+    el.summary.hidden = false;
+    document.title = '吃药计时 · 已完成';
+
+    var end = s.endedAt || s.doses[s.doses.length - 1];
+    var first = new Date(s.doses[0]);
+    var today = new Date(Date.now());
+    var isToday = first.getFullYear() === today.getFullYear() &&
+                  first.getMonth() === today.getMonth() &&
+                  first.getDate() === today.getDate();
+
+    el.sumSub.textContent = '共 ' + s.doses.length + ' 种 · 历时 ' + fmtLong(end - s.doses[0]) +
+                            (isToday ? '' : ' · ' + (first.getMonth() + 1) + '月' + first.getDate() + '日');
+
+    var need = s.intervalMin * 60000;
+    var html = '';
+    for (var i = 0; i < s.doses.length; i++) {
+      var t = s.doses[i];
+      var gapHtml = '<span class="gap">开始</span>';
+      if (i > 0) {
+        var gap = t - s.doses[i - 1];
+        var early = gap < need - TOLERANCE;
+        gapHtml = '<span class="gap' + (early ? ' early' : '') + '">' +
+                  (early ? '⚠ ' : '') + '+' + fmtDur(gap) + '</span>';
+      }
+      html += '<li><span class="idx">第 ' + (i + 1) + ' 种</span>' +
+              '<span class="at">' + clockOf(t) + '</span>' + gapHtml + '</li>';
+    }
+    el.list.innerHTML = html;
+  }
+
+  /* ---------- 计时器 ---------- */
+
+  function startTicker() {
+    stopTicker();
+    ticker = setInterval(render, 250);
+  }
+  function stopTicker() {
+    if (ticker) { clearInterval(ticker); ticker = null; }
+  }
+  function sync() {
+    if (s.done) stopTicker(); else startTicker();
+    render();
+  }
+
+  /* ---------- 交互 ---------- */
+
+  el.btn.addEventListener('click', function () {
+    var n = s.doses.length;
+
+    if (n > 0) {
+      var gap = Date.now() - s.doses[n - 1];
+      var need = s.intervalMin * 60000;
+      if (need - gap > TOLERANCE) {
+        var ok = window.confirm('还没到 ' + s.intervalMin + ' 分钟（才等了 ' +
+                                fmtLeft(gap) + '）。\n仍然记下第 ' + (n + 1) + ' 种药吗？');
+        if (!ok) return;
+      }
+    }
+
+    buzz(12);
+    s.doses.push(Date.now());
+    save(); render();
+  });
+
+  el.end.addEventListener('click', function () {
+    if (!s.doses.length) return;
+    s.done = true;
+    s.endedAt = Date.now();
+    save(); stopTicker(); render();
+    window.scrollTo(0, 0);
+  });
+
+  el.undo.addEventListener('click', function () {
+    if (s.done || !s.doses.length) return;
+    s.doses.pop();
+    save(); render();
+  });
+
+  el.intervalBtn.addEventListener('click', function () {
+    var i = INTERVALS.indexOf(s.intervalMin);
+    s.intervalMin = INTERVALS[(i + 1) % INTERVALS.length];
+    save(); render();
+  });
+
+  el.again.addEventListener('click', function () {
+    var keep = s.intervalMin;
+    s = fresh();
+    s.intervalMin = keep;
+    save(); sync();
+  });
+
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) sync();
+  });
+  window.addEventListener('focus', sync);
+
+  sync();
+
+  // 手机从后台切回来、或另开一个标签时保持一致
+  window.addEventListener('storage', function (e) {
+    if (e.key !== KEY) return;
+    s = load(); sync();
+  });
+})();
+</script>
+</body>
+</html>
